@@ -1,5 +1,6 @@
 import numpy as np
 from heapq import heappush, heappop
+from collections import deque
 
 # Hàm BFS (dùng cho map nhỏ ≤ 12x12)
 def run_bfs(grid, start, goal):
@@ -24,10 +25,7 @@ def run_bfs(grid, start, goal):
             return move, dist[start]
     return 'S', dist[start]
 
-from collections import deque
-
 # Hàm A* heuristic Manhattan
-
 def run_astar(grid, start, goal):
     n_rows, n_cols = len(grid), len(grid[0])
     open_set = [(0 + abs(goal[0]-start[0]) + abs(goal[1]-start[1]), 0, start)]
@@ -132,15 +130,14 @@ class Agents:
             best_robot = None
             best_score = -float('inf')
             for i in available_robots:
-                if self.target_age[i] <= 3:
-                    continue
+                # Cho phép robot nhận đơn sớm hơn (không chờ >3 bước)
                 r, c, _ = self.robots[i]
                 _, d1 = self.run_path((r, c), (sr, sc))
                 _, d2 = self.run_path((sr, sc), (tr, tc))
                 total_time = t + d1 + d2
                 margin = int(deadline) - total_time
-                if margin < 0:
-                    continue
+                if margin < -3:
+                    continue  # vẫn cho phép nhận đơn gấp một chút
                 alpha = 0.5 if not self.use_astar else 0.3
                 score = -d1 - d2 + alpha * margin
                 if score > best_score:
