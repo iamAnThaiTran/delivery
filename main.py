@@ -27,14 +27,31 @@ def render_env(env):
     norm = colors.BoundaryNorm(bounds, cmap.N)
 
     plt.imshow(vis, cmap=cmap, norm=norm)
+
+    # Ghi số thứ tự robot và target
+    for i, robot in enumerate(env.robots):
+        r, c = robot.position
+        plt.text(c, r, str(i), va='center', ha='center', color='white', fontsize=8, weight='bold')
+
+        if hasattr(robot, 'agent') and robot.agent.robots_target[i] is not None:
+            pid = robot.agent.robots_target[i]
+            for p in env.packages:
+                if p.pid == pid:
+                    if robot.carrying == 0:
+                        tr, tc = p.start
+                    else:
+                        tr, tc = p.target
+                    plt.text(tc, tr, str(i), va='center', ha='center', color='black', fontsize=8, weight='bold')
+                    break
+
     plt.title(f"Time Step: {env.t}, Total Reward: {env.total_reward:.2f}")
-    plt.pause(0.3)
+    plt.pause(0.05)
     plt.clf()
 
 
 
 if __name__ == "__main__":
-    env = Environment(map_file="map3.txt", max_time_steps=1000, n_robots=5, n_packages=500, seed=10)
+    env = Environment(map_file="map1.txt", max_time_steps=1000, n_robots=5, n_packages=100, seed=10)
     state = env.reset()
 
     from agent import Agents
