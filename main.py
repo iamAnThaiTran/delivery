@@ -1,5 +1,6 @@
 from env import Environment
 from agent import Agents as Agents
+#from greedyagent import GreedyAgents as Agents
 import numpy as np
 import matplotlib.pyplot as plt
 
