@@ -25,7 +25,10 @@ def run_bfs(grid, start, goal):
             return move, dist[start]
     return 'S', dist[start]
 
+from collections import deque
+
 # Hàm A* heuristic Manhattan
+
 def run_astar(grid, start, goal):
     n_rows, n_cols = len(grid), len(grid[0])
     open_set = [(0 + abs(goal[0]-start[0]) + abs(goal[1]-start[1]), 0, start)]
@@ -63,7 +66,6 @@ def run_astar(grid, start, goal):
 
     return 'S', g_score[goal]
 
-
 class Agents:
     def __init__(self):
         self.n_robots = 0
@@ -75,6 +77,8 @@ class Agents:
         self.is_init = False
         self.reserved = set()
         self.target_age = []
+        self.stuck_counter = []
+        self.prev_positions = []
         self.use_astar = True
 
     def init_agents(self, state):
@@ -84,6 +88,8 @@ class Agents:
         self.robots = [(r-1, c-1, carry) for (r, c, carry) in state['robots']]
         self.robots_target = [None] * self.n_robots
         self.target_age = [0] * self.n_robots
+        self.stuck_counter = [0] * self.n_robots
+        self.prev_positions = [(r-1, c-1) for (r, c, _) in state['robots']]
         self.packages = []
         self.packages_free = []
         for p in state['packages']:
@@ -98,6 +104,11 @@ class Agents:
             pr, pc, pcarry = self.robots[i]
             r, c, carry = robot
             self.robots[i] = (r-1, c-1, carry)
+            if (r-1, c-1) == self.prev_positions[i]:
+                self.stuck_counter[i] += 1
+            else:
+                self.stuck_counter[i] = 0
+            self.prev_positions[i] = (r-1, c-1)
             if pcarry != 0 and carry == 0:
                 self.robots_target[i] = None
 
@@ -122,24 +133,37 @@ class Agents:
         t = state['time_step']
         actions = []
         reserved_positions = set()
+        future_reserved = set() if self.use_astar else None
 
         available_robots = [i for i, (_, _, carry) in enumerate(self.robots) if carry == 0]
         for j, (pid, sr, sc, tr, tc, deadline) in enumerate(self.packages):
+            for i in available_robots:
+                if self.use_astar:
+                    zone_width = len(self.map[0]) // max(1, self.n_robots // 2)
+                    zone_start = (i % (self.n_robots // 2)) * zone_width
+                    zone_end = zone_start + zone_width
+                    if not (zone_start <= sr < zone_end):
+                        continue
             if not self.packages_free[j]:
                 continue
             best_robot = None
             best_score = -float('inf')
             for i in available_robots:
-                # Cho phép robot nhận đơn sớm hơn (không chờ >3 bước)
+                if self.target_age[i] <= 3 and self.stuck_counter[i] < 5:
+                    continue
                 r, c, _ = self.robots[i]
                 _, d1 = self.run_path((r, c), (sr, sc))
                 _, d2 = self.run_path((sr, sc), (tr, tc))
                 total_time = t + d1 + d2
                 margin = int(deadline) - total_time
-                if margin < -3:
-                    continue  # vẫn cho phép nhận đơn gấp một chút
+                if margin < 0:
+                    continue
                 alpha = 0.5 if not self.use_astar else 0.3
-                score = -d1 - d2 + alpha * margin
+                manhattan = abs(r - sr) + abs(c - sc)
+                zone_penalty = 0.5 * abs(sr - r) if self.use_astar else 0
+                if d1 > 1.5 * manhattan:
+                    continue  # bỏ qua gói hàng khó tiếp cận
+                score = -d1 - d2 + alpha * margin - zone_penalty
                 if score > best_score:
                     best_score = score
                     best_robot = i
@@ -151,6 +175,7 @@ class Agents:
                 self.robots_target[best_robot] = pid
                 self.packages_free[j] = False
                 self.target_age[best_robot] = 0
+                self.stuck_counter[best_robot] = 0
 
         for i in range(self.n_robots):
             r, c, carry = self.robots[i]
@@ -172,10 +197,12 @@ class Agents:
 
             dr, dc = {'U': (-1,0), 'D': (1,0), 'L': (0,-1), 'R': (0,1), 'S': (0,0)}[move]
             next_pos = (r + dr, c + dc)
-            if next_pos in reserved_positions:
+            if next_pos in reserved_positions or (self.use_astar and next_pos in future_reserved):
                 move = 'S'
                 next_pos = (r, c)
             reserved_positions.add(next_pos)
+            if self.use_astar:
+                future_reserved.add(next_pos)
             actions.append((move, pkg_act))
 
         return actions
