@@ -89,6 +89,7 @@ class Agents:
         self.blocking_flags = []
         self.next_positions = []
         self.stuck_counter = []
+        self.path_cache = {}  # <== Thêm bộ nhớ đệm kết quả tìm đường
 
     def init_agents(self, state):
         self.n_robots = len(state['robots'])
@@ -103,6 +104,7 @@ class Agents:
         self.blocking_flags = [False for _ in range(self.n_robots)]
         self.next_positions = [None for _ in range(self.n_robots)]
         self.stuck_counter = [0 for _ in range(self.n_robots)]
+        self.path_cache = {}  # reset cache mỗi khi khởi tạo lại
         for p in state['packages']:
             pid, sr, sc, tr, tc, _, deadline = p
             deadline = int(deadline)
@@ -124,10 +126,17 @@ class Agents:
                 self.packages.append((pid, sr-1, sc-1, tr-1, tc-1, deadline))
                 self.packages_free.append(True)
 
+    # Hàm tìm đường có cache để tránh tính lại nhiều lần
     def run_path(self, start, goal, return_path=False):
+        key = (start, goal, return_path)
+        if key in self.path_cache:
+            return self.path_cache[key]
         if self.use_astar:
-            return run_astar(self.map, start, goal, return_path)
-        return run_bfs(self.map, start, goal, return_path)
+            result = run_astar(self.map, start, goal, return_path)
+        else:
+            result = run_bfs(self.map, start, goal, return_path)
+        self.path_cache[key] = result
+        return result
 
     def get_actions(self, state):
         if not self.is_init:
@@ -245,6 +254,7 @@ class Agents:
                     # Đánh dấu robot blocking cần né chỗ cho robot mang hàng
                     self.blocking_flags[blocking] = True
 
+#                # Nếu robot blocking không mang hàng thì không cần né
                 elif carry != 0 and blocking_carry != 0:
                     if i < blocking:
                         reserved_positions[next_pos] = i

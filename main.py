@@ -1,76 +1,40 @@
 from env import Environment
-from agent import Agents as Agents
+from agent import Agents
+#from greedyagent import GreedyAgents as Agents
+
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import colors
 
-def render_env(env):
-    obs = np.array(env.grid)
-    vis = np.copy(obs)
+if __name__=="__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Multi-Agent Reinforcement Learning for Delivery")
+    parser.add_argument("--num_agents", type=int, default=5, help="Number of agents")
+    parser.add_argument("--n_packages", type=int, default=10, help="Number of packages")
+    parser.add_argument("--max_steps", type=int, default=100, help="Maximum number of steps per episode")
+    parser.add_argument("--seed", type=int, default=2025, help="Random seed for reproducibility")
+    parser.add_argument("--max_time_steps", type=int, default=1000, help="Maximum time steps for the environment")
+    parser.add_argument("--map", type=str, default="map.txt", help="Map name")
 
-    # Vẽ điểm pickup duy nhất (KHÔNG vẽ dropoff)
-    for p in env.packages:
-        if p.status == 'waiting':
-            sr, sc = p.start
-            vis[sr][sc] = 4  # Pickup point (orange)
+    args = parser.parse_args()
+    np.random.seed(args.seed)
 
-    # Vẽ robot sau cùng (đè lên pickup)
-    for robot in env.robots:
-        r, c = robot.position
-        if robot.carrying == 0:
-            vis[r][c] = 2  # Robot chưa cầm hàng (blue)
-        else:
-            vis[r][c] = 3  # Robot đang cầm hàng (green)
-
-    cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'orange'])
-    bounds = [0,1,2,3,4,5]
-    norm = colors.BoundaryNorm(bounds, cmap.N)
-
-    plt.imshow(vis, cmap=cmap, norm=norm)
-
-    # Ghi số thứ tự robot và target
-    for i, robot in enumerate(env.robots):
-        r, c = robot.position
-        plt.text(c, r, str(i), va='center', ha='center', color='white', fontsize=8, weight='bold')
-
-        if hasattr(robot, 'agent') and robot.agent.robots_target[i] is not None:
-            pid = robot.agent.robots_target[i]
-            for p in env.packages:
-                if p.pid == pid:
-                    if robot.carrying == 0:
-                        tr, tc = p.start
-                    else:
-                        tr, tc = p.target
-                    plt.text(tc, tr, str(i), va='center', ha='center', color='black', fontsize=8, weight='bold')
-                    break
-
-    plt.title(f"Time Step: {env.t}, Total Reward: {env.total_reward:.2f}")
-    plt.pause(0.05)
-    plt.clf()
-
-
-
-if __name__ == "__main__":
-    env = Environment(map_file="map1.txt", max_time_steps=1000, n_robots=5, n_packages=100, seed=10)
+    env = Environment(map_file=args.map, max_time_steps=args.max_time_steps,
+                      n_robots=args.num_agents, n_packages=args.n_packages,
+                      seed = args.seed)
+    
     state = env.reset()
-
-    from agent import Agents
     agents = Agents()
     agents.init_agents(state)
-
+    print(state)
+    #env.render()
     done = False
-    rewards = []
-
-    plt.figure(figsize=(6, 6))
-
+    t = 0
     while not done:
-        render_env(env)
         actions = agents.get_actions(state)
-        state, reward, done, infos = env.step(actions)
-        agents.update_inner_state(state)
-        rewards.append(reward)
+        next_state, reward, done, infos = env.step(actions)
+        state = next_state
+        env.render()
+        t += 1
 
-    plt.close()
-    print("✅ Episode finished")
-    print("🏁 Total reward:", infos['total_reward'])
-    print("🕒 Total time steps:", infos['total_time_steps'])
+    print("Episode finished")
+    print("Total reward:", infos['total_reward'])
+    print("Total time steps:", infos['total_time_steps'])
