@@ -8,17 +8,22 @@ def run_bfs(grid, start, goal, return_path=False):
     dq = deque([goal])
     dist = {goal: 0}
     came_from = {}
+    visited = set([goal])
+    
     while dq:
         current = dq.popleft()
         for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
             nxt = (current[0] + dx, current[1] + dy)
             if (0 <= nxt[0] < n_rows and 0 <= nxt[1] < n_cols and
-                grid[nxt[0]][nxt[1]] == 0 and nxt not in dist):
+                grid[nxt[0]][nxt[1]] == 0 and nxt not in visited):
                 dist[nxt] = dist[current] + 1
                 came_from[nxt] = current
+                visited.add(nxt)
                 dq.append(nxt)
+    
     if start not in dist:
         return ('S', float('inf')) if not return_path else []
+
     if not return_path:
         r, c = start
         for move, (dx, dy) in zip(['U','D','L','R'], [(-1,0),(1,0),(0,-1),(0,1)]):
@@ -27,22 +32,42 @@ def run_bfs(grid, start, goal, return_path=False):
                 return move, dist[start]
         return 'S', dist[start]
     else:
+        # Tạo path từ start tới goal dựa trên came_from
         path = []
         curr = start
         while curr != goal:
-            curr = came_from.get(curr, goal)
-            path.append(curr)
+            next_node = came_from.get(curr)
+            if next_node is None:
+                # Không tìm được đường đi hoàn chỉnh
+                return []
+            path.append(next_node)
+            curr = next_node
         return path
 
-def run_astar(grid, start, goal, return_path=False):
+def run_astar(grid, start, goal, return_path=False, max_steps=10000):
     n_rows, n_cols = len(grid), len(grid[0])
     open_set = [(0 + abs(goal[0]-start[0]) + abs(goal[1]-start[1]), 0, start)]
     came_from = {}
     g_score = {start: 0}
+    closed_set = set()
+    steps = 0
+
     while open_set:
+        steps += 1
+        if steps > max_steps:
+            # Quá nhiều bước duyệt, trả về không tìm được đường
+            if return_path:
+                return []
+            else:
+                return 'S', float('inf')
+
         _, cost, current = heappop(open_set)
         if current == goal:
             break
+        if current in closed_set:
+            continue
+        closed_set.add(current)
+
         for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
             nxt = (current[0]+dx, current[1]+dy)
             if 0 <= nxt[0] < n_rows and 0 <= nxt[1] < n_cols and grid[nxt[0]][nxt[1]] == 0:
@@ -52,9 +77,22 @@ def run_astar(grid, start, goal, return_path=False):
                     priority = tentative_g + abs(goal[0]-nxt[0]) + abs(goal[1]-nxt[1])
                     heappush(open_set, (priority, tentative_g, nxt))
                     came_from[nxt] = current
+
     if goal not in g_score:
-        return ('S', float('inf')) if not return_path else []
-    if not return_path:
+        if return_path:
+            return []
+        else:
+            return 'S', float('inf')
+
+    if return_path:
+        path = []
+        curr = goal
+        while curr != start:
+            path.append(curr)
+            curr = came_from.get(curr, start)
+        path.reverse()
+        return path
+    else:
         curr = goal
         while curr != start:
             prev = came_from[curr]
@@ -64,15 +102,8 @@ def run_astar(grid, start, goal, return_path=False):
                     if (dx, dy) == (mx, my):
                         return move, g_score[goal]
                 break
+            curr = prev
         return 'S', g_score[goal]
-    else:
-        path = []
-        curr = goal
-        while curr != start:
-            path.append(curr)
-            curr = came_from.get(curr, start)
-        path.reverse()
-        return path
 
 class Agents:
     def __init__(self):
@@ -127,6 +158,35 @@ class Agents:
                 self.packages_free.append(True)
 
     # Hàm tìm đường có cache để tránh tính lại nhiều lần
+    # def run_path(self, start, goal, return_path=False, max_path_len=50):
+    #     max_path_len = 1000 if len(self.map) <= 12 else 50
+    #     key = (start, goal)
+    #     cached = self.path_cache.get(key)
+    #     if cached is not None:
+    #         dist, path = cached
+    #     else:
+    #         if self.use_astar:
+    #             path = run_astar(self.map, start, goal, return_path=True)
+    #         else:
+    #             path = run_bfs(self.map, start, goal, return_path=True)
+    #         dist = len(path) if path else float('inf')
+    #         self.path_cache[key] = (dist, path)   # Lưu cache bằng dict
+        
+    #     if not path or dist == float('inf'):
+    #         # Không tìm được đường đi
+    #         if return_path:
+    #             return []
+    #         else:
+    #             return 'S', dist
+        
+    #     if return_path:
+    #         # Trả về đường đi cắt ngắn tối đa max_path_len (giúp map lớn)
+    #         return path[:max_path_len]
+        
+    #     # return_path=False: trả move kế tiếp + khoảng cách đầy đủ (không cắt)
+    #     next_pos = path[0]
+    #     move = self.get_move(start, next_pos)
+    #     return move, dist
     def run_path(self, start, goal, return_path=False):
         key = (start, goal, return_path)
         if key in self.path_cache:
@@ -137,6 +197,16 @@ class Agents:
             result = run_bfs(self.map, start, goal, return_path)
         self.path_cache[key] = result
         return result
+
+
+    def get_move(self, start, next_pos):
+        dx, dy = next_pos[0] - start[0], next_pos[1] - start[1]
+        for move, (mx, my) in zip(['U', 'D', 'L', 'R'], [(-1,0),(1,0),(0,-1),(0,1)]):
+            if (dx, dy) == (mx, my):
+                return move
+        # fallback nếu không tìm được move hợp lệ
+        return 'S'
+
 
     def get_actions(self, state):
         if not self.is_init:
@@ -285,7 +355,7 @@ class Agents:
                 margin = int(deadline) - total_time
                 if margin < 0:
                     continue
-                alpha = 0.5 if not self.use_astar else 0.3
+                alpha = 0.9 if not self.use_astar else 0.7
                 score = -d1 - d2 + alpha * margin
                 if score > best_score:
                     best_score = score

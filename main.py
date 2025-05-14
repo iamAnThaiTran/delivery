@@ -45,13 +45,13 @@ def render_env(env):
                     break
 
     plt.title(f"Time Step: {env.t}, Total Reward: {env.total_reward:.2f}")
-    plt.pause(0.1)
+    plt.pause(0.05)
     plt.clf()
 
 
 
 if __name__ == "__main__":
-    env = Environment(map_file="map1.txt", max_time_steps=1000, n_robots=5, n_packages=100, seed=10)
+    env = Environment(map_file="map2.txt", max_time_steps=1000, n_robots=5, n_packages=100, seed=10)
     state = env.reset()
 
     from agent import Agents
