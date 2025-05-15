@@ -121,6 +121,7 @@ class Agents:
         self.next_positions = []
         self.stuck_counter = []
         self.path_cache = {}  # <== Thêm bộ nhớ đệm kết quả tìm đường
+        self.current_robot_positions = {}
 
     def init_agents(self, state):
         self.n_robots = len(state['robots'])
@@ -156,6 +157,9 @@ class Agents:
             if not any(pkg[0] == pid for pkg in self.packages):
                 self.packages.append((pid, sr-1, sc-1, tr-1, tc-1, deadline))
                 self.packages_free.append(True)
+        self.current_robot_positions.clear()  # Xóa dữ liệu cũ
+        for i, (r, c, _) in enumerate(self.robots):
+            self.current_robot_positions[i] = (r, c)
 
     # Hàm tìm đường có cache để tránh tính lại nhiều lần
     # def run_path(self, start, goal, return_path=False, max_path_len=50):
@@ -209,6 +213,7 @@ class Agents:
 
 
     def get_actions(self, state):
+    # Hàm chính để lấy hành động cho tất cả robot
         if not self.is_init:
             self.init_agents(state)
             self.is_init = True
@@ -224,64 +229,98 @@ class Agents:
         blocking_moves = {}
         blocking_next_positions = {}
 
-        # Xử lý robot mang hàng trước
         carrying_robots = [i for i, (_, _, carry) in enumerate(self.robots) if carry != 0]
-        non_carrying_robots = [i for i, (_, _, carry) in enumerate(self.robots) if carry == 0]
 
-        def get_priority(i):
-            """Tính độ ưu tiên dựa trên deadline và khoảng cách đến đích."""
+        non_carrying_robots = [i for i, (_, _, carry) in enumerate(self.robots) if carry == 0]
+        #carrying_robots = [i for i, (_, _, carry) in enumerate(self.robots) if carry != 0]
+        # Sắp xếp theo độ ưu tiên
+        
+        def get_priority(i, t):
             if self.robots[i][2] == 0:
-                return float('inf')  # Robot không mang hàng có ưu tiên thấp nhất
+                return float('inf')
             idx = next(j for j, pkg in enumerate(self.packages) if pkg[0] == self.robots[i][2])
             _, _, _, tr, tc, deadline = self.packages[idx]
             r, c, _ = self.robots[i]
             distance = abs(r - tr) + abs(c - tc)
-            return deadline - t - distance  # Ưu tiên robot có margin thấp
+            return deadline - t - distance
+        
+        # Sắp xếp robot mang hàng theo độ ưu tiên
+        carrying_robots.sort(key=lambda i: get_priority(i, t))
+        #print(f"Processing carrying_robots in order: {carrying_robots}")
 
-        # Xử lý xung đột giữa hai robot mang hàng
-        def resolve_carrying_conflict(i, blocking, r, c, next_pos, reserved_positions):
-            priority_i = get_priority(i)
-            priority_blocking = get_priority(blocking)
-            if priority_i < priority_blocking:  # Robot i có ưu tiên cao hơn
+        #xu ly va cham robot mang hang
+        def resolve_carrying_conflict(i, blocking, r, c, next_pos, reserved_positions, t):
+            priority_i = get_priority(i, t)
+            priority_blocking = get_priority(blocking, t)
+            #print(f"robot {i} priority: {priority_i}")
+           # print(f"robot {blocking} priority: {priority_blocking}")
+
+            br, bc, _ = self.robots[blocking]
+            if priority_i < priority_blocking:
                 reserved_positions[next_pos] = i
-                # Yêu cầu robot blocking né tránh
-                br, bc, _ = self.robots[blocking]
-                old_blocking_pos = self.next_positions[blocking] or (br, bc)
-                if old_blocking_pos in reserved_positions and reserved_positions[old_blocking_pos] == blocking:
-                    del reserved_positions[old_blocking_pos]
+                move = {(-1,0):'U', (1,0):'D', (0,-1):'L', (0,1):'R'}.get((next_pos[0]-r, next_pos[1]-c), 'S')
+                self.stuck_counter[i] = 0
+                if (br, bc) == next_pos and (br, bc) in reserved_positions:
+                    del reserved_positions[(br, bc)]
                 found_alt = False
-                for alt_move in ['L', 'R', 'U', 'D']:
-                    dr_alt, dc_alt = {'U': (-1,0), 'D': (1,0), 'L': (0,-1), 'R': (0,1)}[alt_move]
-                    alt_pos = (br + dr_alt, bc + dc_alt)
-                    if (0 <= alt_pos[0] < len(self.map) and
-                        0 <= alt_pos[1] < len(self.map[0]) and
-                        self.map[alt_pos[0]][alt_pos[1]] == 0 and
-                        alt_pos not in reserved_positions):
-                        actions[blocking] = (alt_move, actions[blocking][1] if actions[blocking] else '0')
-                        self.next_positions[blocking] = alt_pos
-                        reserved_positions[alt_pos] = blocking
+                for mv, (dr, dc) in zip(['L', 'R', 'U', 'D'], [(0,-1), (0,1), (-1,0), (1,0)]):
+                    nr, nc = br + dr, bc + dc
+                    if (0 <= nr < len(self.map) and 0 <= nc < len(self.map[0]) and
+                        self.map[nr][nc] == 0 and (nr, nc) not in reserved_positions and (nr, nc) != next_pos):
+                        actions[blocking] = (mv, actions[blocking][1] if actions[blocking] else '0')
+                        self.next_positions[blocking] = (nr, nc)
+                        reserved_positions[(nr, nc)] = blocking
                         found_alt = True
                         break
                 if not found_alt:
                     actions[blocking] = ('S', actions[blocking][1] if actions[blocking] else '0')
                     self.next_positions[blocking] = (br, bc)
-                    reserved_positions[(br, bc)] = blocking
-                # Trả về move và next_pos của robot i
-                move = {
-                    (-1, 0): 'U', (1, 0): 'D', (0, -1): 'L', (0, 1): 'R'
-                }.get((next_pos[0] - r, next_pos[1] - c), 'S')
+                    self.stuck_counter[blocking] += 1
                 return move, next_pos
-            else:  # Robot blocking có ưu tiên cao hơn
-                found_alt = False
-                for alt_move in ['L', 'R', 'U', 'D']:
-                    dr_alt, dc_alt = {'U': (-1,0), 'D': (1,0), 'L': (0,-1), 'R': (0,1)}[alt_move]
-                    alt_pos = (r + dr_alt, c + dc_alt)
-                    if (0 <= alt_pos[0] < len(self.map) and
-                        0 <= alt_pos[1] < len(self.map[0]) and
-                        self.map[alt_pos[0]][alt_pos[1]] == 0 and
-                        alt_pos not in reserved_positions):
-                        return alt_move, alt_pos
-                return 'S', (r, c)
+            # Robot i ưu tiên thấp hơn
+            found_alt = False
+            best_alt_pos = None
+            best_alt_mv = None
+            max_dist = -1
+            for mv, (dr, dc) in zip(['L', 'R', 'U', 'D'], [(0,-1), (0,1), (-1,0), (1,0)]):
+                nr, nc = r + dr, c + dc
+                if (0 <= nr < len(self.map) and 0 <= nc < len(self.map[0]) and
+                    self.map[nr][nc] == 0 and (nr, nc) not in reserved_positions and (nr, nc) != (br, bc)):
+                    dist = abs(nr - br) + abs(nc - bc)
+                    if dist > max_dist:
+                        max_dist = dist
+                        best_alt_pos = (nr, nc)
+                        best_alt_mv = mv
+                        found_alt = True
+            if not found_alt:
+                from collections import deque
+                q = deque([(r, c, 0, '')])
+                seen = {(r, c)}
+                max_depth = 2
+                while q and not found_alt:
+                    cr, cc, d, first = q.popleft()
+                    if d >= max_depth:
+                        continue
+                    for mv, (dr, dc) in zip(['U', 'D', 'L', 'R'], [(-1,0), (1,0), (0,-1), (0,1)]):
+                        nr, nc = cr + dr, cc + dc
+                        if (0 <= nr < len(self.map) and 0 <= nc < len(self.map[0]) and
+                            self.map[nr][nc] == 0 and (nr, nc) not in reserved_positions and (nr, nc) != (br, bc) and (nr, nc) not in seen):
+                            seen.add((nr, nc))
+                            q.append((nr, nc, d + 1, first or mv))
+                            best_alt_pos = (nr, nc)
+                            best_alt_mv = first or mv
+                            found_alt = True
+                            break
+            if found_alt:
+                actions[i] = (best_alt_mv, actions[i][1] if actions[i] else '0')
+                self.next_positions[i] = best_alt_pos
+                reserved_positions[best_alt_pos] = i
+                self.stuck_counter[i] = 0
+            else:
+                actions[i] = ('S', actions[i][1] if actions[i] else '0')
+                self.next_positions[i] = (r, c)
+                self.stuck_counter[i] += 1
+            return actions[i][0], self.next_positions[i]
 
         # Xử lý robot mang hàng
         for i in carrying_robots:
@@ -302,10 +341,13 @@ class Agents:
             pkg_act = '2' if (r, c) == (tr, tc) else '0'
 
             self.next_positions[i] = next_pos
+            #print(f"Robot {i} at ({r}, {c}), next_pos = {next_pos}, reserved_positions = {reserved_positions}")
 
+            # Xử lý trường hợp robot mang hàng bị chặn
             if next_pos in reserved_positions:
                 blocking = reserved_positions[next_pos]
                 blocking_carry = self.robots[blocking][2]
+                print(f"Conflict detected: Robot {i} vs Robot {blocking}, blocking_carry = {blocking_carry}")
                 if blocking_carry == 0:
                     reserved_positions[next_pos] = i
                     self.blocking_flags[blocking] = True
@@ -330,15 +372,75 @@ class Agents:
                         actions[blocking] = ('S', actions[blocking][1] if actions[blocking] else '0')
                         self.next_positions[blocking] = (br, bc)
                         reserved_positions[(br, bc)] = blocking
-                else:  # Cả hai đều mang hàng
-                    move, next_pos = resolve_carrying_conflict(i, blocking, r, c, next_pos, reserved_positions)
-                    if move != 'S':
-                        reserved_positions[next_pos] = i
+                    print(f"Robot {blocking} stuck at ({br}, {bc})")
+                    print(f"robot", i, "stuck at", next_pos)
+                else:
+                    move, next_pos = resolve_carrying_conflict(i, blocking, r, c, next_pos, reserved_positions, t)
+                    actions[i] = (move, actions[i][1] if actions[i] else '0')
+                    reserved_positions[next_pos] = i  # Luôn dự trữ next_pos
+                    self.next_positions[i] = next_pos
                     self.stuck_counter[i] += 1 if move == 'S' else 0
+                    
             else:
-                reserved_positions[next_pos] = i
+                for j, (br, bc, _) in enumerate(self.robots):
+                    if j != i and (br, bc) == next_pos and self.robots[j][2] != 0:
+                        blocking = j
+                        blocking_carry = self.robots[j][2]
+                        #print(f"Direct conflict detected: Robot {i} vs Robot {blocking}")
+                        move, next_pos = resolve_carrying_conflict(i, blocking, r, c, next_pos, reserved_positions, t)
+                        actions[i] = (move, actions[i][1] if actions[i] else '0')
+                        reserved_positions[next_pos] = i
+                        self.next_positions[i] = next_pos
+                        self.stuck_counter[i] += 1 if move == 'S' else 0
+                        break
+                    if j != i and (br, bc) == next_pos and self.robots[j][2] == 0:
+                        blocking = j
+                        blocking_carry = 0
+                        print(f"Direct conflict detected: Robot {i} vs Robot {blocking}, blocking_carry = {blocking_carry}")
+                        reserved_positions[next_pos] = i  # Robot mang hàng được ưu tiên
+                        self.blocking_flags[blocking] = True
+                        old_blocking_pos = self.next_positions[blocking] or (br, bc)
+                        if old_blocking_pos in reserved_positions and reserved_positions[old_blocking_pos] == blocking:
+                            del reserved_positions[old_blocking_pos]
+                        found_alt = False
+                        for alt_move in ['L', 'R', 'U', 'D']:
+                            dr_alt, dc_alt = {'U': (-1,0), 'D': (1,0), 'L': (0,-1), 'R': (0,1)}[alt_move]
+                            alt_pos = (br + dr_alt, bc + dc_alt)
+                            accepted_flag = True
+                            for k, (kr, kc, _) in enumerate(self.robots):
+                                if k !=j and self.robots[k][2] != 0 and (kr, kc) == alt_pos:
+                                    accepted_flag = False
+                                    break
 
+
+                            
+                            if (accepted_flag and
+                                0 <= alt_pos[0] < len(self.map) and
+                                0 <= alt_pos[1] < len(self.map[0]) and
+                                self.map[alt_pos[0]][alt_pos[1]] == 0 and
+
+                                
+                                alt_pos not in reserved_positions
+                            ):
+                                actions[blocking] = (alt_move, actions[blocking][1] if actions[blocking] else '0')
+                                self.next_positions[blocking] = alt_pos
+                                reserved_positions[alt_pos] = blocking
+                                found_alt = True
+                                print(f"Robot {blocking} need moved to ({alt_pos[0]}, {alt_pos[1]})")
+                                break
+                        if not found_alt:
+                            actions[blocking] = ('S', actions[blocking][1] if actions[blocking] else '0')
+                            self.next_positions[blocking] = (br, bc)
+                            self.stuck_counter[blocking] += 1  # Theo dõi robot kẹt
+                        print(f"Robot {blocking} stuck at ({br}, {bc})")
+                        print(f"Robot {i} stuck at {next_pos}")
+                        break
+                
+            reserved_positions[next_pos] = i
             actions[i] = (move, pkg_act)
+    
+
+  
 
         # Gán mục tiêu cho robot không mang hàng
         available_robots = [i for i in non_carrying_robots if actions[i] is None]
