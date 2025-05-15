@@ -189,6 +189,7 @@ class Environment:
         # For each robot, compute the new position based on the movement action.
         old_pos = {}
         next_pos = {}
+        
         for i, robot in enumerate(self.robots):
             move, pkg_act = actions[i]
             new_pos = self.compute_new_position(robot.position, move)
@@ -392,4 +393,6 @@ if __name__=="__main__":
         t += 1
         if t == 100:
             break
+
+        
     
